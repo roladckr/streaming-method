@@ -1,0 +1,9 @@
+# Normalize line endings so Windows, Mac, and Linux do not produce spurious
+# differences on every commit.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.xlsx binary
+*.xls binary

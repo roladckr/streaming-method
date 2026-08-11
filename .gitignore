@@ -1,0 +1,54 @@
+# ---- Node / n8n ----
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.n8n/
+
+# ---- Environment variables / secrets ----
+# NEVER commit credentials, tokens, or API keys
+.env
+.env.*
+!.env.example
+credentials.json
+*.pem
+*.key
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+*.egg-info/
+
+# ---- Large data files ----
+# Test spreadsheets stay local: GitHub rejects files larger than 100 MB
+data/
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.parquet
+!data/small-sample.csv
+
+# ---- Office temporary files ----
+~$*.xlsx
+~$*.docx
+~$*.pptx
+
+# ---- Operating system ----
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- Editors ----
+.vscode/
+.idea/
+*.swp
