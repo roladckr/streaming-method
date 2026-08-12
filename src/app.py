@@ -1,0 +1,145 @@
+from pathlib import Path
+
+from flask import Flask, jsonify, request
+
+from src.processors.car_rental_c2 import (
+    process_car_rental_c2,
+)
+
+
+app = Flask(__name__)
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+LOCAL_DATA_DIR = BASE_DIR / "data"
+
+
+SUPPORTED_OPERATIONS = {
+    "CAR_RENTAL_C2",
+}
+
+
+LOCAL_CAR_RENTAL_FILES = [
+    LOCAL_DATA_DIR / "B2S_Car_Billing_part1.xlsx",
+    LOCAL_DATA_DIR / "B2S_Car_Billing_part2.xlsx",
+    LOCAL_DATA_DIR / "B2S_Car_Billing_part3.xlsx",
+    LOCAL_DATA_DIR / "B2S_Car_Billing_part4.xlsx",
+]
+
+
+@app.get("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": "pcard-file-service",
+        "supported_operations": sorted(
+            SUPPORTED_OPERATIONS
+        ),
+    })
+
+
+@app.post("/process")
+def process():
+    payload = request.get_json(
+        silent=True
+    )
+
+    if not payload:
+        return jsonify({
+            "status": "error",
+            "message": "JSON body is required",
+        }), 400
+
+    operation = payload.get("operation")
+
+    if not operation:
+        return jsonify({
+            "status": "error",
+            "message": "operation is required",
+        }), 400
+
+    if operation not in SUPPORTED_OPERATIONS:
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Unsupported operation: "
+                f"{operation}"
+            ),
+            "supported_operations": sorted(
+                SUPPORTED_OPERATIONS
+            ),
+        }), 400
+
+    lookup_keys = payload.get(
+        "lookup_keys",
+        []
+    )
+
+    if not isinstance(lookup_keys, list):
+        return jsonify({
+            "status": "error",
+            "message": (
+                "lookup_keys must be an array"
+            ),
+        }), 400
+
+    if not lookup_keys:
+        return jsonify({
+            "status": "error",
+            "message": (
+                "lookup_keys cannot be empty"
+            ),
+        }), 400
+
+    try:
+        if operation == "CAR_RENTAL_C2":
+            result = process_car_rental_c2(
+                file_paths=LOCAL_CAR_RENTAL_FILES,
+                lookup_keys=lookup_keys,
+            )
+
+            return jsonify({
+                "status": "success",
+                "operation": operation,
+                **result,
+            })
+
+        return jsonify({
+            "status": "error",
+            "message": (
+                "Operation handler not implemented"
+            ),
+        }), 501
+
+    except FileNotFoundError as error:
+        return jsonify({
+            "status": "error",
+            "type": "FILE_NOT_FOUND",
+            "message": str(error),
+        }), 500
+
+    except ValueError as error:
+        return jsonify({
+            "status": "error",
+            "type": "INVALID_DATA",
+            "message": str(error),
+        }), 400
+
+    except Exception as error:
+        app.logger.exception(
+            "Unexpected processing error"
+        )
+
+        return jsonify({
+            "status": "error",
+            "type": "INTERNAL_ERROR",
+            "message": str(error),
+        }), 500
+
+
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=8080,
+        debug=False,
+    )

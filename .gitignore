@@ -16,12 +16,14 @@ pnpm-debug.log*
 .env.*
 !.env.example
 credentials.json
+token.json
 *.pem
 *.key
 
 # ---- Python ----
 __pycache__/
 *.py[cod]
+*.pyc
 .venv/
 venv/
 env/
@@ -31,6 +33,7 @@ env/
 # ---- Large data files ----
 # Test spreadsheets stay local: GitHub rejects files larger than 100 MB
 data/
+local_data/
 *.xlsx
 *.xls
 *.xlsm
@@ -52,3 +55,9 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# ---- Local-only diagnostic scripts ----
+# Temporary dev scripts, not part of the repo test suite
+inspect_b2s_headers.py
+test_c2_batch.py
+test_xlsx_stream.py
