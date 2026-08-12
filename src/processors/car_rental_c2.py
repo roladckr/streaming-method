@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 from typing import Iterable
 
+from src.sources.base import SourceQuery
 from src.streaming.xlsx_stream import (
     stream_xlsx_rows,
 )
@@ -26,27 +28,37 @@ C2_COLUMNS = {
 }
 
 
-# B2S Car Billing source filenames are C2-specific knowledge, so they
-# live here rather than in app.py's request-handling contract.
+# B2S Car Billing source identity is C2-specific knowledge, so it
+# lives here rather than in app.py's request-handling contract or in
+# either FileSource implementation (which stay generic).
 #
-# This is local/dev-only file discovery. How production acquires
-# these files (e.g. Google Drive) is a separate, not-yet-implemented
-# concern - do not assume this glob is the production mechanism.
-B2S_SOURCE_GLOB = "B2S_Car_Billing_part*.xlsx"
+# Local/dev: matched by filename pattern under data/.
+# Production (Google Drive): explicit file IDs configured via the
+# CAR_RENTAL_C2_DRIVE_FILE_IDS env var (comma-separated). Real IDs
+# are not known yet - this only defines how they'd be supplied.
+B2S_LOCAL_PATTERN = "B2S_Car_Billing_part*.xlsx"
+B2S_DRIVE_FILE_IDS_ENV = "CAR_RENTAL_C2_DRIVE_FILE_IDS"
 
 
-def resolve_source_files(
-    data_dir: str | Path,
-    pattern: str = B2S_SOURCE_GLOB,
-) -> list[Path]:
+def c2_source_query() -> SourceQuery:
     """
-    Discover local B2S Car Billing files in `data_dir`.
-
-    Returns files sorted by name, so part1 is scanned before part2,
-    matching the previous hardcoded ordering.
+    Builds the SourceQuery describing where C2's four B2S Car Billing
+    files come from. Read at call time (not import time) so the
+    active FILE_SOURCE/env configuration is always honored.
     """
 
-    return sorted(Path(data_dir).glob(pattern))
+    raw_ids = os.environ.get(B2S_DRIVE_FILE_IDS_ENV, "")
+
+    drive_file_ids = tuple(
+        file_id.strip()
+        for file_id in raw_ids.split(",")
+        if file_id.strip()
+    )
+
+    return SourceQuery(
+        pattern=B2S_LOCAL_PATTERN,
+        drive_file_ids=drive_file_ids,
+    )
 
 
 def normalize_key(value) -> str:

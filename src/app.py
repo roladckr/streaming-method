@@ -1,11 +1,14 @@
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
 from src.processors.car_rental_c2 import (
+    c2_source_query,
     process_car_rental_c2,
-    resolve_source_files,
 )
+from src.sources.google_drive_source import GoogleDriveSource
+from src.sources.local_source import LocalFileSource
 
 
 app = Flask(__name__)
@@ -14,10 +17,42 @@ app = Flask(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOCAL_DATA_DIR = BASE_DIR / "data"
 
+FILE_SOURCE_ENV = "FILE_SOURCE"
+DEFAULT_FILE_SOURCE = "local"
+
 
 SUPPORTED_OPERATIONS = {
     "CAR_RENTAL_C2",
 }
+
+
+def _get_file_source():
+    """
+    Selects the configured file source provider. Generic across
+    operations - contains no C2-specific (or any processor-specific)
+    knowledge.
+
+    FILE_SOURCE=local (default): read from the local data/ directory.
+    FILE_SOURCE=google_drive: download from Google Drive using
+    Application Default Credentials.
+    """
+
+    mode = (
+        os.environ.get(FILE_SOURCE_ENV, DEFAULT_FILE_SOURCE)
+        .strip()
+        .lower()
+    )
+
+    if mode == "local":
+        return LocalFileSource(LOCAL_DATA_DIR)
+
+    if mode == "google_drive":
+        return GoogleDriveSource()
+
+    raise ValueError(
+        f"Unsupported {FILE_SOURCE_ENV}: {mode!r} "
+        "(expected 'local' or 'google_drive')"
+    )
 
 
 @app.get("/health")
@@ -86,12 +121,15 @@ def process():
 
     try:
         if operation == "CAR_RENTAL_C2":
-            result = process_car_rental_c2(
-                file_paths=resolve_source_files(
-                    LOCAL_DATA_DIR
-                ),
-                lookup_keys=lookup_keys,
-            )
+            source = _get_file_source()
+
+            with source.resolve(
+                c2_source_query()
+            ) as file_paths:
+                result = process_car_rental_c2(
+                    file_paths=file_paths,
+                    lookup_keys=lookup_keys,
+                )
 
             return jsonify({
                 "status": "success",
