@@ -1,0 +1,6 @@
+# Local development / test dependencies only.
+# Not installed in the production Docker image (see Dockerfile,
+# which installs requirements.txt only).
+-r requirements.txt
+
+openpyxl

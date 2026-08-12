@@ -26,6 +26,29 @@ C2_COLUMNS = {
 }
 
 
+# B2S Car Billing source filenames are C2-specific knowledge, so they
+# live here rather than in app.py's request-handling contract.
+#
+# This is local/dev-only file discovery. How production acquires
+# these files (e.g. Google Drive) is a separate, not-yet-implemented
+# concern - do not assume this glob is the production mechanism.
+B2S_SOURCE_GLOB = "B2S_Car_Billing_part*.xlsx"
+
+
+def resolve_source_files(
+    data_dir: str | Path,
+    pattern: str = B2S_SOURCE_GLOB,
+) -> list[Path]:
+    """
+    Discover local B2S Car Billing files in `data_dir`.
+
+    Returns files sorted by name, so part1 is scanned before part2,
+    matching the previous hardcoded ordering.
+    """
+
+    return sorted(Path(data_dir).glob(pattern))
+
+
 def normalize_key(value) -> str:
     """
     Normalize lookup IDs so values coming from Excel,
@@ -57,6 +80,11 @@ def process_single_file(
     XLSX streaming engine.
 
     Only the columns required by C2 are requested.
+
+    Duplicate Item within this file: confirmed - first row occurrence
+    for a given Item wins, later rows with the same Item are ignored
+    (logged, not returned). This is deliberate dedup logic, not an
+    accident of iteration order.
     """
 
     path = Path(file_path)
@@ -132,11 +160,21 @@ def process_car_rental_c2(
     """
     Search multiple B2S Car Billing files.
 
-    Files are processed sequentially.
+    Files are processed sequentially in the order given by
+    `file_paths`. Once a lookup key is found, it is removed from
+    the remaining set so later files do not need to search for it
+    again.
 
-    Once a lookup key is found, it is removed from
-    the remaining set so later files do not need
-    to search for it again.
+    Duplicate semantics:
+    - Within a single file: CONFIRMED - the first row occurrence of
+      an Item wins (see process_single_file). This is deliberate.
+    - Across files, if the same Item appears in more than one file:
+      whichever file is scanned first wins, purely because it's
+      scanned first. This is an artifact of `file_paths` ordering,
+      NOT a confirmed business rule - it has not been validated
+      against how duplicate Items across files should actually be
+      resolved. Do not rely on cross-file ordering as intentional
+      precedence until that's confirmed with the business.
     """
 
     normalized_keys = {

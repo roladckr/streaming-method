@@ -338,16 +338,29 @@ def stream_xlsx_rows(
             worksheet_path
         ) as worksheet_source:
 
+            row_tag = f"{{{MAIN_NS}}}row"
+            sheet_data_tag = f"{{{MAIN_NS}}}sheetData"
+
             context = ET.iterparse(
                 worksheet_source,
-                events=("end",),
+                events=("start", "end"),
             )
+
+            # Track the sheetData element as it opens so processed
+            # <row> children can be detached from it below. Without
+            # this, iterparse's cleared row elements stay attached
+            # as empty children of sheetData for the life of the
+            # parse, growing with every row in the worksheet.
+            sheet_data_elem = None
 
             for event, elem in context:
 
-                if elem.tag != (
-                    f"{{{MAIN_NS}}}row"
-                ):
+                if event == "start":
+                    if elem.tag == sheet_data_tag:
+                        sheet_data_elem = elem
+                    continue
+
+                if elem.tag != row_tag:
                     continue
 
                 row_number_raw = (
@@ -401,5 +414,10 @@ def stream_xlsx_rows(
                 )
 
                 # Critical for streaming:
-                # release XML row memory immediately.
+                # release XML row memory immediately, and detach
+                # the now-empty row from sheetData so it doesn't
+                # keep accumulating as the worksheet is parsed.
                 elem.clear()
+
+                if sheet_data_elem is not None:
+                    sheet_data_elem.remove(elem)

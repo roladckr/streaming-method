@@ -4,6 +4,7 @@ from flask import Flask, jsonify, request
 
 from src.processors.car_rental_c2 import (
     process_car_rental_c2,
+    resolve_source_files,
 )
 
 
@@ -17,14 +18,6 @@ LOCAL_DATA_DIR = BASE_DIR / "data"
 SUPPORTED_OPERATIONS = {
     "CAR_RENTAL_C2",
 }
-
-
-LOCAL_CAR_RENTAL_FILES = [
-    LOCAL_DATA_DIR / "B2S_Car_Billing_part1.xlsx",
-    LOCAL_DATA_DIR / "B2S_Car_Billing_part2.xlsx",
-    LOCAL_DATA_DIR / "B2S_Car_Billing_part3.xlsx",
-    LOCAL_DATA_DIR / "B2S_Car_Billing_part4.xlsx",
-]
 
 
 @app.get("/health")
@@ -94,7 +87,9 @@ def process():
     try:
         if operation == "CAR_RENTAL_C2":
             result = process_car_rental_c2(
-                file_paths=LOCAL_CAR_RENTAL_FILES,
+                file_paths=resolve_source_files(
+                    LOCAL_DATA_DIR
+                ),
                 lookup_keys=lookup_keys,
             )
 
