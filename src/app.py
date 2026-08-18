@@ -7,7 +7,15 @@ from src.processors.car_rental_c2 import (
     c2_source_query,
     process_car_rental_c2,
 )
-from src.sources.google_drive_source import GoogleDriveSource
+from src.processors.vcc_step_08 import (
+    process_vcc_step_08,
+    vcc_step_08_source_query,
+)
+from src.sources.base import NoSourceFilesResolvedError
+from src.sources.google_drive_source import (
+    GoogleDriveConfigError,
+    GoogleDriveSource,
+)
 from src.sources.local_source import LocalFileSource
 
 
@@ -21,9 +29,19 @@ FILE_SOURCE_ENV = "FILE_SOURCE"
 DEFAULT_FILE_SOURCE = "local"
 
 
-SUPPORTED_OPERATIONS = {
-    "CAR_RENTAL_C2",
+# Dispatch table: operation name -> (source query builder, processor).
+# This is pure configuration - app.py stays a thin dispatcher and
+# never contains column mappings, business rules, or math for any
+# operation. Adding an operation means adding one entry here.
+OPERATIONS = {
+    "CAR_RENTAL_C2": (c2_source_query, process_car_rental_c2),
+    "VCC_STEP_08": (
+        vcc_step_08_source_query,
+        process_vcc_step_08,
+    ),
 }
+
+SUPPORTED_OPERATIONS = set(OPERATIONS)
 
 
 def _get_file_source():
@@ -120,29 +138,47 @@ def process():
         }), 400
 
     try:
-        if operation == "CAR_RENTAL_C2":
-            source = _get_file_source()
+        build_query, run_processor = OPERATIONS[operation]
 
-            with source.resolve(
-                c2_source_query()
-            ) as file_paths:
-                result = process_car_rental_c2(
-                    file_paths=file_paths,
-                    lookup_keys=lookup_keys,
+        source = _get_file_source()
+
+        with source.resolve(build_query()) as file_paths:
+            if not file_paths:
+                # Zero resolved source files is not the same thing as
+                # zero matches: a processor returning matched_count=0
+                # must mean "files were searched, key wasn't in them",
+                # never "there was nothing to search". Fail explicitly
+                # instead of letting this look like a normal
+                # zero-match response.
+                raise NoSourceFilesResolvedError(
+                    f"No source files resolved for operation "
+                    f"{operation!r}."
                 )
 
-            return jsonify({
-                "status": "success",
-                "operation": operation,
-                **result,
-            })
+            result = run_processor(
+                file_paths=file_paths,
+                lookup_keys=lookup_keys,
+            )
 
         return jsonify({
+            "status": "success",
+            "operation": operation,
+            **result,
+        })
+
+    except NoSourceFilesResolvedError as error:
+        return jsonify({
             "status": "error",
-            "message": (
-                "Operation handler not implemented"
-            ),
-        }), 501
+            "type": "NO_SOURCE_FILES",
+            "message": str(error),
+        }), 503
+
+    except GoogleDriveConfigError as error:
+        return jsonify({
+            "status": "error",
+            "type": "SOURCE_CONFIG_ERROR",
+            "message": str(error),
+        }), 503
 
     except FileNotFoundError as error:
         return jsonify({

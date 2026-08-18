@@ -56,6 +56,58 @@ def cell_reference_to_column(reference: str) -> str:
     return match.group(1)
 
 
+def _iter_shared_strings(source) -> Iterator[str]:
+    """
+    Stream-decode xl/sharedStrings.xml one <si> entry at a time.
+
+    Split out from load_shared_strings() so the same memory-bounded
+    technique used by stream_xlsx_rows can be exercised directly by a
+    regression test (see tests/test_xlsx_stream.py).
+
+    Like sheetData's <row> children, cleared <si> elements stay
+    attached as empty children of the <sst> root for the life of the
+    parse unless explicitly detached - so si elements are removed
+    from the root immediately after being decoded, the same way
+    stream_xlsx_rows detaches processed <row> elements from
+    sheetData.
+    """
+
+    si_tag = f"{{{MAIN_NS}}}si"
+
+    context = ET.iterparse(
+        source,
+        events=("start", "end"),
+    )
+
+    root = None
+
+    for event, elem in context:
+        if event == "start":
+            if root is None:
+                root = elem
+            continue
+
+        if elem.tag != si_tag:
+            continue
+
+        text_parts = []
+
+        for text_node in elem.iter(
+            f"{{{MAIN_NS}}}t"
+        ):
+            if text_node.text is not None:
+                text_parts.append(
+                    text_node.text
+                )
+
+        yield "".join(text_parts)
+
+        elem.clear()
+
+        if root is not None:
+            root.remove(elem)
+
+
 def load_shared_strings(
     archive: ZipFile,
 ) -> list[str]:
@@ -71,35 +123,8 @@ def load_shared_strings(
     if shared_strings_path not in archive.namelist():
         return []
 
-    strings: list[str] = []
-
     with archive.open(shared_strings_path) as source:
-        context = ET.iterparse(
-            source,
-            events=("end",),
-        )
-
-        for event, elem in context:
-            if elem.tag != f"{{{MAIN_NS}}}si":
-                continue
-
-            text_parts = []
-
-            for text_node in elem.iter(
-                f"{{{MAIN_NS}}}t"
-            ):
-                if text_node.text is not None:
-                    text_parts.append(
-                        text_node.text
-                    )
-
-            strings.append(
-                "".join(text_parts)
-            )
-
-            elem.clear()
-
-    return strings
+        return list(_iter_shared_strings(source))
 
 
 def get_first_worksheet_path(
@@ -249,6 +274,105 @@ def parse_cell_value(
 
     except ValueError:
         return raw_value
+
+
+def read_header_row(
+    file_path: str | Path,
+    header_row_number: int = 1,
+) -> dict[str, str]:
+    """
+    Read one header row from the first worksheet and return a mapping
+    of header text -> Excel column letter.
+
+    Generic, contains no business logic. Lets a processor that
+    doesn't have a verified fixed column layout (unlike CAR_RENTAL_C2,
+    which uses known column letters directly) resolve column letters
+    by header name before calling stream_xlsx_rows.
+
+    Stops as soon as the header row has been read - it does not scan
+    the rest of the file.
+
+    Example:
+
+        headers = read_header_row(path)
+        # {"Order ID": "B", "Line Num": "C", ...}
+
+        stream_xlsx_rows(
+            path,
+            requested_columns=[headers["Order ID"]],
+        )
+    """
+
+    path = Path(file_path)
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"XLSX file not found: {path}"
+        )
+
+    row_tag = f"{{{MAIN_NS}}}row"
+
+    with ZipFile(path, "r") as archive:
+        shared_strings = load_shared_strings(archive)
+        worksheet_path = get_first_worksheet_path(archive)
+
+        with archive.open(
+            worksheet_path
+        ) as worksheet_source:
+
+            context = ET.iterparse(
+                worksheet_source,
+                events=("end",),
+            )
+
+            for event, elem in context:
+                if elem.tag != row_tag:
+                    continue
+
+                row_number_raw = elem.attrib.get("r")
+
+                try:
+                    row_number = int(row_number_raw)
+                except (TypeError, ValueError):
+                    row_number = -1
+
+                if row_number != header_row_number:
+                    elem.clear()
+
+                    if row_number > header_row_number:
+                        break
+
+                    continue
+
+                headers: dict[str, str] = {}
+
+                for cell in elem.findall(
+                    f"{{{MAIN_NS}}}c"
+                ):
+                    reference = cell.attrib.get("r", "")
+                    column = cell_reference_to_column(
+                        reference
+                    )
+                    value = parse_cell_value(
+                        cell, shared_strings
+                    )
+
+                    if value is None:
+                        continue
+
+                    header_text = str(value).strip()
+
+                    if header_text:
+                        headers[header_text] = column
+
+                elem.clear()
+
+                return headers
+
+    raise ValueError(
+        f"Header row {header_row_number} not found in "
+        f"{path.name}"
+    )
 
 
 def stream_xlsx_rows(

@@ -17,6 +17,10 @@ DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 # scales with total file size - this only bounds a single chunk.
 DOWNLOAD_CHUNK_SIZE = 10 * 1024 * 1024  # 10 MiB
 
+# Drive API page size for files().list() - the API caps this at 1000
+# regardless of what's requested.
+DRIVE_LIST_PAGE_SIZE = 1000
+
 
 class GoogleDriveConfigError(RuntimeError):
     """
@@ -91,15 +95,31 @@ class GoogleDriveSource(FileSource):
             return sorted(entries, key=lambda entry: entry[1])
 
         if query.drive_query:
-            response = (
-                service.files()
-                .list(
-                    q=query.drive_query,
-                    fields="files(id, name)",
+            files: list[dict] = []
+            page_token = None
+
+            while True:
+                request_kwargs = {
+                    "q": query.drive_query,
+                    "fields": "nextPageToken, files(id, name)",
+                    "pageSize": DRIVE_LIST_PAGE_SIZE,
+                }
+
+                if page_token:
+                    request_kwargs["pageToken"] = page_token
+
+                response = (
+                    service.files()
+                    .list(**request_kwargs)
+                    .execute()
                 )
-                .execute()
-            )
-            files = response.get("files", [])
+
+                files.extend(response.get("files", []))
+
+                page_token = response.get("nextPageToken")
+
+                if not page_token:
+                    break
 
             if not files:
                 raise GoogleDriveConfigError(
@@ -123,13 +143,16 @@ class GoogleDriveSource(FileSource):
         tmp_dir = tempfile.TemporaryDirectory(
             prefix="drive-source-"
         )
+        tmp_root = Path(tmp_dir.name).resolve()
 
         try:
             service = self._get_service()
             downloaded: list[Path] = []
 
             for file_id, name in file_entries:
-                dest = Path(tmp_dir.name) / name
+                dest = self._safe_destination(
+                    tmp_root, file_id, name
+                )
                 self._download(service, file_id, dest)
                 downloaded.append(dest)
         except Exception:
@@ -138,6 +161,53 @@ class GoogleDriveSource(FileSource):
             raise
 
         return ResolvedFiles(downloaded, cleanup=tmp_dir.cleanup)
+
+    @staticmethod
+    def _safe_destination(
+        tmp_root: Path, file_id: str, name: str
+    ) -> Path:
+        """
+        Build a unique, traversal-safe local destination for one
+        downloaded file.
+
+        Two different Drive file IDs can share the same filename, and
+        Drive-provided filenames are untrusted input (they can contain
+        "../" or other path segments). To handle both:
+
+        - `.name` reduces the Drive filename to a bare basename,
+          discarding any directory components (so "../../x.xlsx" and
+          "nested/path.xlsx" both collapse to a safe leaf name).
+        - each file is written under its own `file_id` subdirectory,
+          so two files that reduce to the same basename never collide
+          - and the original filename is still preserved exactly for
+            debugging/logging (see `_source_file` in processor
+            output), instead of being mangled with a prefix.
+
+        The resolved path is then verified to still be inside
+        `tmp_root` before any write happens, and this raises instead
+        of silently writing outside the temp directory if it isn't.
+        """
+
+        safe_name = Path(name).name.strip()
+
+        if not safe_name or safe_name in (".", ".."):
+            raise ValueError(
+                f"Refusing to download Drive file {file_id!r}: "
+                f"unsafe or empty filename {name!r}"
+            )
+
+        dest = (tmp_root / file_id / safe_name).resolve()
+
+        if dest != tmp_root and tmp_root not in dest.parents:
+            raise ValueError(
+                f"Refusing to download Drive file {file_id!r}: "
+                f"resolved path {dest} escapes the temp directory "
+                f"{tmp_root}"
+            )
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        return dest
 
     @staticmethod
     def _chunked_download(

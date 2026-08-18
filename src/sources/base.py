@@ -65,6 +65,22 @@ class ResolvedFiles(AbstractContextManager):
         return False
 
 
+class NoSourceFilesResolvedError(RuntimeError):
+    """
+    Raised when a FileSource resolved zero files for an operation
+    that requires at least one source file to search.
+
+    This is deliberately distinct from a processor returning zero
+    matches: matched_count == 0 is a legitimate result when source
+    files exist but none contain the requested lookup keys. Zero
+    *resolved files* means there was nothing to search in the first
+    place (e.g. a local glob pattern matched nothing, or a caller
+    ignored an empty result rather than treating it as an error), and
+    accounting workflows must never see that look like a normal
+    zero-match response.
+    """
+
+
 class FileSource(ABC):
     """
     Resolves a SourceQuery to local filesystem Path objects the
