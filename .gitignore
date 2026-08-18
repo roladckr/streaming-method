@@ -16,12 +16,14 @@ pnpm-debug.log*
 .env.*
 !.env.example
 credentials.json
+token.json
 *.pem
 *.key
 
 # ---- Python ----
 __pycache__/
 *.py[cod]
+*.pyc
 .venv/
 venv/
 env/
@@ -30,13 +32,18 @@ env/
 
 # ---- Large data files ----
 # Test spreadsheets stay local: GitHub rejects files larger than 100 MB
+# Local/company spreadsheet data
 data/
-*.xlsx
-*.xls
-*.xlsm
+local_data/
+
+# Spreadsheet files are ignored by default
+*.xlsx*
+~$*.xlsx
+
+# Allow committed synthetic test fixtures
+!tests/fixtures/*.xlsx
 *.csv
 *.parquet
-!data/small-sample.csv
 
 # ---- Office temporary files ----
 ~$*.xlsx
@@ -52,3 +59,17 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# ---- Local-only diagnostic scripts ----
+# Temporary dev scripts at the repo root, not part of the repo test
+# suite. Anchored to the root (leading /) so these patterns don't
+# also match same-named files under tests/ - tests/test_xlsx_stream.py
+# is a real, committed part of the test suite and must not be ignored.
+/inspect_b2s_headers.py
+/test_c2_batch.py
+/test_xlsx_stream.py
+
+# ---- Test fixtures (exception) ----
+# Small, synthetic XLSX fixtures under tests/fixtures/ ARE committed.
+# data/ and local_data/ (real/company spreadsheets) stay fully ignored.
+!tests/fixtures/*.xlsx
